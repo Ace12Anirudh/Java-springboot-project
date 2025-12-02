@@ -68,7 +68,7 @@ pipeline {
           dir('infra') {
             sh '''
               terraform init -input=false
-              terraform plan -out=tfplan -input=false
+              terraform plan -out=tfplan -input=false -var-file=envs/dev.tfvars
               terraform apply -input=false -auto-approve tfplan
             '''
           }
@@ -78,6 +78,8 @@ pipeline {
 
     stage('Discover Instances & Deploy via SSH') {
       steps {
+        unstash 'frontend-artifact'
+        unstash 'backend-artifact'
         withCredentials([
           [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CRED_ID],
           [$class: 'SSHUserPrivateKeyBinding', credentialsId: SSH_KEY_CRED, keyFileVariable: 'SSH_KEY_FILE']
@@ -105,14 +107,9 @@ pipeline {
             echo "Frontend private IPs: $FRONT_IPS"
             echo "Backend private IPs: $BACK_IPS"
 
-            # unstash artifacts
+            # Prepare artifacts
             cd ..
             mkdir -p deploy
-            stash -q name:frontend-artifact
-            stash -q name:backend-artifact
-            # unstash to working dir
-            unstash 'frontend-artifact'
-            unstash 'backend-artifact'
             mv frontend-artifact.zip deploy/ || true
             mv backend-artifact.zip deploy/ || true
 
