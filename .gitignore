@@ -1,0 +1,47 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+crash.log
+override.tf
+override.tf.json
+*.tfvars
+*.tfvars.json
+plan.out
+.vscode/
+
+# General
+.DS_Store
+*.log
+*.bak
+*.swp
+
+# Java/Spring Boot (from context)
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/resources/**
+!**/src/test/**/resources/**
+pom.xml.tag
+pom.xml.next
+pom.xml.bak
+pom.xml.releaseBackup
+dependency-reduced-pom.xml
+build/
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*.log
+temp/
+upload/
+logs/
+*.cache
+*.diff
+*.rej
+*.swo
+*.swn
+*.un~
+Thumbs.db

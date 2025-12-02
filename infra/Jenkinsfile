@@ -1,0 +1,145 @@
+pipeline {
+  agent any
+  environment {
+    AWS_REGION = 'us-east-1'
+    AWS_CRED_ID = 'aws-creds'
+    SSH_KEY_CRED = 'jenkins-ssh-key'
+    SONAR_TOKEN = credentials('sonar-token')
+    JENKINS_SSH_USER = 'ec2-user'   // default Amazon Linux user for initial scp; we use sudo in commands
+    REMOTE_APP_USER = 'appuser'     // user created by user-data; systemd runs under this user
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Sonar - Frontend') {
+      steps {
+        dir('frontend') {
+          sh '''
+            # run sonar-scanner for python (ensure sonar-scanner is available on agent)
+            sonar-scanner -Dsonar.projectKey=student-management-frontend \
+              -Dsonar.sources=src \
+              -Dsonar.login=${SONAR_TOKEN} || true
+          '''
+        }
+      }
+    }
+
+    stage('Build Frontend artifact') {
+      steps {
+        dir('frontend') {
+          sh '''
+            # package the frontend src directory as zip
+            rm -f ../frontend-artifact.zip
+            zip -r ../frontend-artifact.zip src requirements.txt || true
+          '''
+        }
+      }
+      stash includes: 'frontend-artifact.zip', name: 'frontend-artifact'
+    }
+
+    stage('Sonar - Backend') {
+      steps {
+        dir('backend') {
+          sh "mvn -B -DskipTests clean package sonar:sonar -Dsonar.login=${SONAR_TOKEN} || true"
+        }
+      }
+    }
+
+    stage('Build Backend artifact') {
+      steps {
+        dir('backend') {
+          sh '''
+            mvn -B -DskipTests clean package
+            cp target/*.jar ../backend.jar || true
+            cd ..
+            zip -j backend-artifact.zip backend.jar || true
+          '''
+        }
+      }
+      stash includes: 'backend-artifact.zip', name: 'backend-artifact'
+    }
+
+    stage('Terraform Init & Apply') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CRED_ID]]) {
+          dir('infra') {
+            sh '''
+              terraform init -input=false
+              terraform plan -out=tfplan -input=false
+              terraform apply -input=false -auto-approve tfplan
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Discover Instances & Deploy via SSH') {
+      steps {
+        withCredentials([
+          [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CRED_ID],
+          [$class: 'SSHUserPrivateKeyBinding', credentialsId: SSH_KEY_CRED, keyFileVariable: 'SSH_KEY_FILE']
+        ]) {
+          sh '''
+            set -ex
+            cd infra
+            FRONT_ASG_NAME=$(terraform output -raw frontend_asg_name)
+            BACK_ASG_NAME=$(terraform output -raw backend_asg_name)
+            BASTION_IP=$(terraform output -raw bastion_public_ip)
+            RDS_ENDPOINT=$(terraform output -raw rds_endpoint || true)
+
+            FRONT_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $FRONT_ASG_NAME --query "AutoScalingGroups[0].Instances[].InstanceId" --output text)
+            BACK_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $BACK_ASG_NAME --query "AutoScalingGroups[0].Instances[].InstanceId" --output text)
+
+            get_ips() {
+              ids="$1"
+              if [ -z "$ids" ]; then echo ""; return; fi
+              aws ec2 describe-instances --instance-ids $ids --query "Reservations[].Instances[].PrivateIpAddress" --output text
+            }
+
+            FRONT_IPS=$(get_ips "$FRONT_INSTANCE_IDS")
+            BACK_IPS=$(get_ips "$BACK_INSTANCE_IDS")
+
+            echo "Frontend private IPs: $FRONT_IPS"
+            echo "Backend private IPs: $BACK_IPS"
+
+            # unstash artifacts
+            cd ..
+            mkdir -p deploy
+            stash -q name:frontend-artifact
+            stash -q name:backend-artifact
+            # unstash to working dir
+            unstash 'frontend-artifact'
+            unstash 'backend-artifact'
+            mv frontend-artifact.zip deploy/ || true
+            mv backend-artifact.zip deploy/ || true
+
+            # Use the bastion as jump host to reach private instances.
+            # The SSH private key must allow connecting to bastion (public) as ec2-user,
+            # and then from bastion to private IPs as ec2-user (or appuser) if network allowed.
+            for ip in $FRONT_IPS; do
+              echo "Deploying frontend to ${ip} via bastion ${BASTION_IP}"
+              scp -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" deploy/frontend-artifact.zip ec2-user@${ip}:/tmp/ || true
+              ssh -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" ec2-user@${ip} "sudo mkdir -p /opt/frontend && sudo unzip -o /tmp/frontend-artifact.zip -d /opt/frontend && sudo chown -R appuser:appuser /opt/frontend && sudo -u appuser /opt/frontend/.venv/bin/pip install -r /opt/frontend/requirements.txt || true && sudo systemctl restart frontend.service || true"
+            done
+
+            for ip in $BACK_IPS; do
+              echo "Deploying backend to ${ip} via bastion ${BASTION_IP}"
+              scp -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" deploy/backend-artifact.zip ec2-user@${ip}:/tmp/ || true
+              ssh -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" ec2-user@${ip} "sudo mkdir -p /opt/backend && sudo unzip -o /tmp/backend-artifact.zip -d /opt/backend && sudo chown -R appuser:appuser /opt/backend && sudo systemctl restart backend.service || true"
+            done
+          '''
+        }
+      }
+    }
+
+  }
+
+  post {
+    always {
+      cleanWs()
+    }
+  }
+}
