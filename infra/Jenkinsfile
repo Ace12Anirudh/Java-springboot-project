@@ -43,7 +43,7 @@ pipeline {
     stage('Sonar - Backend') {
       steps {
         dir('backend') {
-          sh "mvn -B -DskipTests clean package sonar:sonar -Dsonar.login=${SONAR_TOKEN} || true"
+          sh "/opt/maven/bin/mvn -B -DskipTests clean package sonar:sonar -Dsonar.login=${SONAR_TOKEN} || true"
         }
       }
     }
@@ -52,7 +52,7 @@ pipeline {
       steps {
         dir('backend') {
           sh '''
-            mvn -B -DskipTests clean package
+            /opt/maven/bin/mvn -B -DskipTests clean package
             cp target/*.jar ../backend.jar || true
             cd ..
             zip -j backend-artifact.zip backend.jar || true
