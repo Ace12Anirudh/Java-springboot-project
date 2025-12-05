@@ -36,8 +36,8 @@ pipeline {
             zip -r ../frontend-artifact.zip src requirements.txt || true
           '''
         }
+        stash includes: 'frontend-artifact.zip', name: 'frontend-artifact'
       }
-      stash includes: 'frontend-artifact.zip', name: 'frontend-artifact'
     }
 
     stage('Sonar - Backend') {
@@ -58,8 +58,8 @@ pipeline {
             zip -j backend-artifact.zip backend.jar || true
           '''
         }
+        stash includes: 'backend-artifact.zip', name: 'backend-artifact'
       }
-      stash includes: 'backend-artifact.zip', name: 'backend-artifact'
     }
 
     stage('Terraform Init & Apply') {
