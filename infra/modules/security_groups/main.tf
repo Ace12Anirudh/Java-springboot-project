@@ -37,15 +37,17 @@ resource "aws_security_group" "alb_sg" {
 resource "aws_security_group" "bastion_sg" {
   name = "${var.name_prefix}-bastion-sg"
   vpc_id = var.vpc_id
+  
   dynamic "ingress" {
-    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    for_each = var.allowed_ssh_cidr != "" ? [var.allowed_ssh_cidr] : []
     content {
-      from_port = 22 
-      to_port = 22
-      protocol = "tcp" 
-      cidr_blocks = [var.allowed_ssh_cidr] 
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
     }
   }
+  
   egress { 
     from_port = 0
     to_port = 0
@@ -66,15 +68,17 @@ resource "aws_security_group" "frontend_sg" {
     # ALB will send traffic from its IPs; allow from ALB SG
     security_groups = [aws_security_group.alb_sg.id]
   }
+  
   dynamic "ingress" {
-    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    for_each = var.allowed_ssh_cidr != "" ? [var.allowed_ssh_cidr] : []
     content {
-      from_port = 22 
-      to_port = 22 
-      protocol = "tcp" 
-      cidr_blocks = [var.allowed_ssh_cidr] 
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
     }
   }
+  
   egress { 
     from_port = 0 
     to_port = 0 
@@ -94,15 +98,17 @@ resource "aws_security_group" "backend_sg" {
     protocol = "tcp"
     security_groups = [aws_security_group.alb_sg.id]
   }
+  
   dynamic "ingress" {
-    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    for_each = var.allowed_ssh_cidr != "" ? [var.allowed_ssh_cidr] : []
     content {
-      from_port = 22 
-      to_port = 22 
-      protocol = "tcp" 
-      cidr_blocks = [var.allowed_ssh_cidr] 
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
     }
   }
+  
   egress { 
     from_port = 0 
     to_port = 0 
@@ -204,3 +210,9 @@ resource "aws_security_group" "jenkins_sonar_sg" {
   tags = merge(var.tags, { Name = "${var.name_prefix}-jenkins-sonar-sg" })
 }
 
+output "alb_sg_id" { value = aws_security_group.alb_sg.id }
+output "bastion_sg_id" { value = aws_security_group.bastion_sg.id }
+output "frontend_sg_id" { value = aws_security_group.frontend_sg.id }
+output "backend_sg_id" { value = aws_security_group.backend_sg.id }
+output "rds_sg_id" { value = aws_security_group.rds_sg.id }
+output "jenkins_sonar_sg_id" { value = aws_security_group.jenkins_sonar_sg.id }
