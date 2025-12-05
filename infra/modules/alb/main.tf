@@ -17,7 +17,7 @@ resource "aws_lb" "alb" {
 }
 
 resource "aws_lb_target_group" "frontend_tg" {
-  name = "${var.name}-frontend-tg"
+  name = "stud-mgmt-frontend-tg"
   port = var.frontend_target_group_port
   protocol = "HTTP"
   vpc_id = var.vpc_id
@@ -33,7 +33,7 @@ resource "aws_lb_target_group" "frontend_tg" {
 }
 
 resource "aws_lb_target_group" "backend_tg" {
-  name = "${var.name}-backend-tg"
+  name = "stud-mgmt-backend-tg"
   port = var.backend_target_group_port
   protocol = "HTTP"
   vpc_id = var.vpc_id

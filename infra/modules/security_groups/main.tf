@@ -37,12 +37,15 @@ resource "aws_security_group" "alb_sg" {
 resource "aws_security_group" "bastion_sg" {
   name = "${var.name_prefix}-bastion-sg"
   vpc_id = var.vpc_id
-  ingress { 
-    from_port = 22 
-    to_port = 22
-    protocol = "tcp" 
-    cidr_blocks = [var.allowed_ssh_cidr] 
+  dynamic "ingress" {
+    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    content {
+      from_port = 22 
+      to_port = 22
+      protocol = "tcp" 
+      cidr_blocks = [var.allowed_ssh_cidr] 
     }
+  }
   egress { 
     from_port = 0
     to_port = 0
@@ -63,12 +66,15 @@ resource "aws_security_group" "frontend_sg" {
     # ALB will send traffic from its IPs; allow from ALB SG
     security_groups = [aws_security_group.alb_sg.id]
   }
-  ingress { 
-    from_port = 22 
-    to_port = 22 
-    protocol = "tcp" 
-    cidr_blocks = [var.allowed_ssh_cidr] 
+  dynamic "ingress" {
+    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    content {
+      from_port = 22 
+      to_port = 22 
+      protocol = "tcp" 
+      cidr_blocks = [var.allowed_ssh_cidr] 
     }
+  }
   egress { 
     from_port = 0 
     to_port = 0 
@@ -88,12 +94,15 @@ resource "aws_security_group" "backend_sg" {
     protocol = "tcp"
     security_groups = [aws_security_group.alb_sg.id]
   }
-  ingress { 
-    from_port = 22 
-    to_port = 22 
-    protocol = "tcp" 
-    cidr_blocks = [var.allowed_ssh_cidr] 
+  dynamic "ingress" {
+    for_each = var.allowed_ssh_cidr != "" ? [1] : []
+    content {
+      from_port = 22 
+      to_port = 22 
+      protocol = "tcp" 
+      cidr_blocks = [var.allowed_ssh_cidr] 
     }
+  }
   egress { 
     from_port = 0 
     to_port = 0 
