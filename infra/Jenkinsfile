@@ -87,46 +87,151 @@ pipeline {
           sh '''
             set -ex
             cd infra
-            FRONT_ASG_NAME=$(terraform output -raw frontend_asg_name)
-            BACK_ASG_NAME=$(terraform output -raw backend_asg_name)
-            BASTION_IP=$(terraform output -raw bastion_public_ip)
-            RDS_ENDPOINT=$(terraform output -raw rds_endpoint || true)
+            
+            # Validate Terraform outputs exist
+            echo "=== Retrieving Terraform Outputs ==="
+            FRONT_ASG_NAME=$(terraform output -raw frontend_asg_name 2>/dev/null || echo "")
+            BACK_ASG_NAME=$(terraform output -raw backend_asg_name 2>/dev/null || echo "")
+            BASTION_IP=$(terraform output -raw bastion_public_ip 2>/dev/null || echo "")
+            RDS_ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "")
+            
+            if [ -z "$FRONT_ASG_NAME" ] || [ -z "$BACK_ASG_NAME" ] || [ -z "$BASTION_IP" ]; then
+              echo "ERROR: Missing required Terraform outputs!"
+              echo "Frontend ASG: $FRONT_ASG_NAME"
+              echo "Backend ASG: $BACK_ASG_NAME"
+              echo "Bastion IP: $BASTION_IP"
+              exit 1
+            fi
+            
+            echo "Frontend ASG Name: $FRONT_ASG_NAME"
+            echo "Backend ASG Name: $BACK_ASG_NAME"
+            echo "Bastion Public IP: $BASTION_IP"
+            echo "RDS Endpoint: $RDS_ENDPOINT"
 
-            FRONT_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $FRONT_ASG_NAME --query "AutoScalingGroups[0].Instances[].InstanceId" --output text)
-            BACK_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $BACK_ASG_NAME --query "AutoScalingGroups[0].Instances[].InstanceId" --output text)
+            # Get instance IDs from Auto Scaling Groups
+            echo "=== Discovering EC2 Instances ==="
+            FRONT_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names $FRONT_ASG_NAME \
+              --region ${AWS_REGION} \
+              --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+              --output text 2>/dev/null || echo "")
+            
+            BACK_INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names $BACK_ASG_NAME \
+              --region ${AWS_REGION} \
+              --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+              --output text 2>/dev/null || echo "")
 
+            echo "Frontend Instance IDs: $FRONT_INSTANCE_IDS"
+            echo "Backend Instance IDs: $BACK_INSTANCE_IDS"
+
+            # Function to get private IPs from instance IDs
             get_ips() {
               ids="$1"
-              if [ -z "$ids" ]; then echo ""; return; fi
-              aws ec2 describe-instances --instance-ids $ids --query "Reservations[].Instances[].PrivateIpAddress" --output text
+              if [ -z "$ids" ]; then 
+                echo ""
+                return
+              fi
+              aws ec2 describe-instances \
+                --instance-ids $ids \
+                --region ${AWS_REGION} \
+                --query "Reservations[].Instances[].PrivateIpAddress" \
+                --output text 2>/dev/null || echo ""
             }
 
             FRONT_IPS=$(get_ips "$FRONT_INSTANCE_IDS")
             BACK_IPS=$(get_ips "$BACK_INSTANCE_IDS")
 
-            echo "Frontend private IPs: $FRONT_IPS"
-            echo "Backend private IPs: $BACK_IPS"
+            echo "=== Instance Private IPs ==="
+            echo "Frontend IPs: $FRONT_IPS"
+            echo "Backend IPs: $BACK_IPS"
+            
+            if [ -z "$FRONT_IPS" ]; then
+              echo "WARNING: No frontend instances found or not yet InService"
+            fi
+            
+            if [ -z "$BACK_IPS" ]; then
+              echo "WARNING: No backend instances found or not yet InService"
+            fi
 
             # Prepare artifacts
             cd ..
             mkdir -p deploy
-            mv frontend-artifact.zip deploy/ || true
-            mv backend-artifact.zip deploy/ || true
+            
+            if [ -f frontend-artifact.zip ]; then
+              mv frontend-artifact.zip deploy/
+              echo "Frontend artifact prepared"
+            else
+              echo "ERROR: frontend-artifact.zip not found!"
+              exit 1
+            fi
+            
+            if [ -f backend-artifact.zip ]; then
+              mv backend-artifact.zip deploy/
+              echo "Backend artifact prepared"
+            else
+              echo "ERROR: backend-artifact.zip not found!"
+              exit 1
+            fi
 
-            # Use the bastion as jump host to reach private instances.
-            # The SSH private key must allow connecting to bastion (public) as ec2-user,
-            # and then from bastion to private IPs as ec2-user (or appuser) if network allowed.
+            # Set SSH options
+            SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ServerAliveInterval=60"
+            PROXY_CMD="ssh -i $SSH_KEY_FILE -W %h:%p $SSH_OPTS ec2-user@${BASTION_IP}"
+
+            # Deploy to frontend instances
+            echo "=== Deploying Frontend ==="
             for ip in $FRONT_IPS; do
               echo "Deploying frontend to ${ip} via bastion ${BASTION_IP}"
-              scp -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" deploy/frontend-artifact.zip ec2-user@${ip}:/tmp/ || true
-              ssh -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" ec2-user@${ip} "sudo mkdir -p /opt/frontend && sudo unzip -o /tmp/frontend-artifact.zip -d /opt/frontend && sudo chown -R appuser:appuser /opt/frontend && sudo -u appuser /opt/frontend/.venv/bin/pip install -r /opt/frontend/requirements.txt || true && sudo systemctl restart frontend.service || true"
+              
+              # Copy artifact
+              scp $SSH_OPTS -i $SSH_KEY_FILE -o ProxyCommand="$PROXY_CMD" \
+                deploy/frontend-artifact.zip ec2-user@${ip}:/tmp/ || {
+                echo "WARNING: Failed to copy frontend artifact to $ip"
+                continue
+              }
+              
+              # Deploy and restart service
+              ssh $SSH_OPTS -i $SSH_KEY_FILE -o ProxyCommand="$PROXY_CMD" ec2-user@${ip} \
+                "sudo mkdir -p /opt/frontend && \
+                 sudo unzip -o /tmp/frontend-artifact.zip -d /opt/frontend && \
+                 sudo chown -R appuser:appuser /opt/frontend && \
+                 sudo -u appuser /opt/frontend/.venv/bin/pip install -r /opt/frontend/requirements.txt 2>/dev/null || true && \
+                 sudo systemctl restart frontend.service && \
+                 sudo systemctl status frontend.service --no-pager" || {
+                echo "WARNING: Failed to deploy frontend to $ip"
+                continue
+              }
+              
+              echo "✓ Frontend deployed successfully to $ip"
             done
 
+            # Deploy to backend instances
+            echo "=== Deploying Backend ==="
             for ip in $BACK_IPS; do
               echo "Deploying backend to ${ip} via bastion ${BASTION_IP}"
-              scp -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" deploy/backend-artifact.zip ec2-user@${ip}:/tmp/ || true
-              ssh -o StrictHostKeyChecking=no -i $SSH_KEY_FILE -o ProxyCommand="ssh -i $SSH_KEY_FILE -W %h:%p -o StrictHostKeyChecking=no ec2-user@${BASTION_IP}" ec2-user@${ip} "sudo mkdir -p /opt/backend && sudo unzip -o /tmp/backend-artifact.zip -d /opt/backend && sudo chown -R appuser:appuser /opt/backend && sudo systemctl restart backend.service || true"
+              
+              # Copy artifact
+              scp $SSH_OPTS -i $SSH_KEY_FILE -o ProxyCommand="$PROXY_CMD" \
+                deploy/backend-artifact.zip ec2-user@${ip}:/tmp/ || {
+                echo "WARNING: Failed to copy backend artifact to $ip"
+                continue
+              }
+              
+              # Deploy and restart service
+              ssh $SSH_OPTS -i $SSH_KEY_FILE -o ProxyCommand="$PROXY_CMD" ec2-user@${ip} \
+                "sudo mkdir -p /opt/backend && \
+                 sudo unzip -o /tmp/backend-artifact.zip -d /opt/backend && \
+                 sudo chown -R appuser:appuser /opt/backend && \
+                 sudo systemctl restart backend.service && \
+                 sudo systemctl status backend.service --no-pager" || {
+                echo "WARNING: Failed to deploy backend to $ip"
+                continue
+              }
+              
+              echo "✓ Backend deployed successfully to $ip"
             done
+            
+            echo "=== Deployment Complete ==="
           '''
         }
       }

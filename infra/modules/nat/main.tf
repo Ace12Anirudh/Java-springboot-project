@@ -49,3 +49,17 @@ resource "aws_route" "private_default" {
   # Ensure you pass at least one public_subnet_id.
   depends_on = [aws_nat_gateway.nat]
 }
+
+# Associate private app subnets with the private route table
+resource "aws_route_table_association" "private_app_assoc" {
+  for_each       = var.private_app_subnet_ids
+  subnet_id      = each.value
+  route_table_id = aws_route_table.private_rt.id
+}
+
+# Associate private db subnets with the private route table
+resource "aws_route_table_association" "private_db_assoc" {
+  for_each       = var.private_db_subnet_ids
+  subnet_id      = each.value
+  route_table_id = aws_route_table.private_rt.id
+}

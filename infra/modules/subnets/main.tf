@@ -48,3 +48,5 @@ resource "aws_route_table_association" "public_assoc" {
   subnet_id = each.value.id
   route_table_id = aws_route_table.public_rt.id
 }
+
+# Private subnet route table associations will be handled by the NAT module

@@ -43,6 +43,8 @@ module "nat" {
   source    = "./modules/nat"
   vpc_id    = module.vpc.vpc_id
   public_subnet_ids = module.subnets.public_subnet_ids
+  private_app_subnet_ids = module.subnets.private_subnet_ids_app_map
+  private_db_subnet_ids = module.subnets.private_subnet_ids_db_map
   tags      = var.tags
 }
 
@@ -77,6 +79,20 @@ module "bastion" {
   user_data_template = file("${path.module}/modules/bastion/user_data_bastion.sh.tpl")
   tags = var.tags
 }
+
+module "jenkins_sonar" {
+  source = "./modules/jenkins_sonar_server"
+  name = "${var.name}-jenkins-sonar"
+  ami_id = data.aws_ami.amzn2.id
+  instance_type = var.jenkins_sonar_instance_type
+  key_name = module.keypair.key_name
+  subnet_id = element(module.subnets.private_subnet_ids_app, 0)
+  security_group_id = module.security_groups.jenkins_sonar_sg
+  iam_instance_profile = module.iam.instance_profile_name
+  user_data_template = file("${path.module}/modules/jenkins_sonar_server/user_data_jenkins_sonar_al2023.sh.tpl")
+  tags = var.tags
+}
+
 
 module "alb" {
   source = "./modules/alb"

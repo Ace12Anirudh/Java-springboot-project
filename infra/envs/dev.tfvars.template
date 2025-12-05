@@ -1,0 +1,33 @@
+# AWS Configuration
+aws_region = "us-east-1"
+name       = "student-management"
+
+# SSH Configuration
+ssh_key_name   = "java-sb-key"
+# IMPORTANT: Replace the line below with your ENTIRE SSH public key on ONE SINGLE LINE
+# Get your key with: cat ~/.ssh/java-sb-key.pub (Linux/Mac) or Get-Content ~\.ssh\java-sb-key.pub (Windows)
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC_REPLACE_THIS_WITH_YOUR_ACTUAL_PUBLIC_KEY_ONE_SINGLE_LINE user@hostname"
+
+# Your public IP for SSH access (find it at https://whatismyip.com)
+# Format: YOUR_IP/32 (example: 203.0.113.45/32)
+jenkins_ssh_cidr = "0.0.0.0/0"
+
+# Instance Sizes
+bastion_instance_type       = "t3.micro"
+jenkins_sonar_instance_type = "t3.large"
+frontend_instance_type      = "t3.micro"
+backend_instance_type       = "t3.micro"
+
+# RDS Configuration
+rds_instance_class = "db.t3.micro"
+rds_username       = "admin"
+rds_password       = "ChangeThisSecurePassword123!"
+
+# Auto Scaling
+frontend_desired_capacity = 1
+frontend_min_size        = 1
+frontend_max_size        = 2
+
+backend_desired_capacity = 1
+backend_min_size        = 1
+backend_max_size        = 2

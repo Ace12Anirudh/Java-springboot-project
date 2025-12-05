@@ -121,3 +121,77 @@ resource "aws_security_group" "rds_sg" {
     }
   tags = merge(var.tags, { Name = "${var.name_prefix}-rds-sg" })
 }
+
+# Jenkins/SonarQube SG: allow SSH, Jenkins (8080), SonarQube (9000) from bastion and app servers
+resource "aws_security_group" "jenkins_sonar_sg" {
+  name = "${var.name_prefix}-jenkins-sonar-sg"
+  vpc_id = var.vpc_id
+  description = "Security group for Jenkins and SonarQube server"
+  
+  # SSH from bastion
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+  
+  # Jenkins web UI from bastion
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+  
+  # SonarQube web UI from bastion
+  ingress {
+    from_port = 9000
+    to_port = 9000
+    protocol = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+  
+  # Jenkins access from frontend instances (for pipeline execution)
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    security_groups = [aws_security_group.frontend_sg.id]
+  }
+  
+  # Jenkins access from backend instances (for pipeline execution)
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    security_groups = [aws_security_group.backend_sg.id]
+  }
+  
+  # SonarQube access from frontend instances (for code analysis)
+  ingress {
+    from_port = 9000
+    to_port = 9000
+    protocol = "tcp"
+    security_groups = [aws_security_group.frontend_sg.id]
+  }
+  
+  # SonarQube access from backend instances (for code analysis)
+  ingress {
+    from_port = 9000
+    to_port = 9000
+    protocol = "tcp"
+    security_groups = [aws_security_group.backend_sg.id]
+  }
+  
+  # Allow all outbound traffic
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  tags = merge(var.tags, { Name = "${var.name_prefix}-jenkins-sonar-sg" })
+}
+

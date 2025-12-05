@@ -45,11 +45,12 @@ variable "ssh_public_key" {
     }
 variable "jenkins_ssh_cidr" { 
     description = "CIDR allowed to SSH (Jenkins server IP), e.g. 1.2.3.4/32" 
-    default = "<JENKINS_PUBLIC_IP>/32" 
+    default = ""
     }
 
 # Instance sizes
 variable "bastion_instance_type" { default = "t3.micro" }
+variable "jenkins_sonar_instance_type" { default = "t3.large" }
 variable "frontend_instance_type" { default = "t3.micro" }
 variable "backend_instance_type" { default = "t3.micro" }
 
@@ -67,7 +68,7 @@ variable "rds_instance_class" { default = "db.t3.micro" }
 variable "rds_username" { default = "admin" }
 variable "rds_password" { 
     description = "RDS password - set via tfvars or secret manager" 
-    default = "ChangeMe123!" 
+    default = "" 
     }
 
 # Extra computed
