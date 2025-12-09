@@ -62,19 +62,19 @@ pipeline {
       }
     }
 
-    stage('Terraform Init & Apply') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CRED_ID]]) {
-          dir('infra') {
-            sh '''
-              terraform init -input=false
-              terraform plan -out=tfplan -input=false
-              terraform apply -input=false -auto-approve tfplan
-            '''
-          }
-        }
-      }
-    }
+    // stage('Terraform Init & Apply') {
+    //   steps {
+    //     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: AWS_CRED_ID]]) {
+    //       dir('infra') {
+    //         sh '''
+    //           terraform init -input=false
+    //           terraform plan -out=tfplan -input=false
+    //           terraform apply -input=false -auto-approve tfplan
+    //         '''
+    //       }
+    //     }
+    //   }
+    // }
 
     stage('Discover Instances & Deploy via SSH') {
       steps {
